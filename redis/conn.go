@@ -56,6 +56,8 @@ type conn struct {
 
 	// Scratch space for formatting integers and floats.
 	numScratch [40]byte
+
+	errCallback func(context.Context, error)
 }
 
 // DialTimeout acts like Dial but takes timeouts for establishing the
@@ -84,6 +86,7 @@ type dialOptions struct {
 	useTLS       bool
 	skipVerify   bool
 	tlsConfig    *tls.Config
+	errCallback  func(context.Context, error)
 }
 
 // DialReadTimeout specifies the timeout for reading a single command reply.
@@ -166,6 +169,13 @@ func DialUseTLS(useTLS bool) DialOption {
 	}}
 }
 
+// DialErrCallback specifies a callback to be run on non-nil errors.
+func DialErrCallback(callback func(context.Context, error)) DialOption {
+	return DialOption{func(do *dialOptions) {
+		do.errCallback = callback
+	}}
+}
+
 // similar cloneTLSClientConfig in the stdlib, but also honor skipVerify for the nil case
 func cloneTLSClientConfig(cfg *tls.Config, skipVerify bool) *tls.Config {
 	if cfg == nil {
@@ -224,6 +234,7 @@ func Dial(network, address string, options ...DialOption) (Conn, error) {
 		br:           bufio.NewReader(netConn),
 		readTimeout:  do.readTimeout,
 		writeTimeout: do.writeTimeout,
+		errCallback:  do.errCallback,
 	}
 
 	if do.password != "" {
@@ -300,13 +311,14 @@ func DialURL(rawurl string, options ...DialOption) (Conn, error) {
 }
 
 // NewConn returns a new Redigo connection for the given net connection.
-func NewConn(netConn net.Conn, readTimeout, writeTimeout time.Duration) Conn {
+func NewConn(netConn net.Conn, readTimeout, writeTimeout time.Duration, errCallback func(context.Context, error)) Conn {
 	return &conn{
 		conn:         netConn,
 		bw:           bufio.NewWriter(netConn),
 		br:           bufio.NewReader(netConn),
 		readTimeout:  readTimeout,
 		writeTimeout: writeTimeout,
+		errCallback:  errCallback,
 	}
 }
 
@@ -321,15 +333,21 @@ func (c *conn) Close() error {
 	return err
 }
 
-func (c *conn) fatal(err error) error {
+func (c *conn) fatal(ctx context.Context, err error) error {
 	c.mu.Lock()
+	call := false
 	if c.err == nil {
 		c.err = err
+		call = c.errCallback != nil
 		// Close connection to force errors on subsequent calls and to unblock
 		// other reader or writer.
 		c.conn.Close()
 	}
 	c.mu.Unlock()
+
+	if call {
+		c.errCallback(ctx, err)
+	}
 	return err
 }
 
@@ -574,7 +592,7 @@ func (c *conn) Send(ctx context.Context, cmd string, args ...interface{}) error 
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
 	if err := c.writeCommand(cmd, args); err != nil {
-		return c.fatal(err)
+		return c.fatal(ctx, err)
 	}
 	return nil
 }
@@ -584,7 +602,7 @@ func (c *conn) Flush(ctx context.Context) error {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
 	if err := c.bw.Flush(); err != nil {
-		return c.fatal(err)
+		return c.fatal(ctx, err)
 	}
 	return nil
 }
@@ -601,7 +619,7 @@ func (c *conn) ReceiveWithTimeout(ctx context.Context, timeout time.Duration) (r
 	c.conn.SetReadDeadline(deadline)
 
 	if reply, err = c.readReply(); err != nil {
-		return nil, c.fatal(err)
+		return nil, c.fatal(ctx, err)
 	}
 	// When using pub/sub, the number of receives can be greater than the
 	// number of sends. To enable normal use of the connection after
@@ -641,12 +659,12 @@ func (c *conn) DoWithTimeout(ctx context.Context, readTimeout time.Duration, cmd
 
 	if cmd != "" {
 		if err := c.writeCommand(cmd, args); err != nil {
-			return nil, c.fatal(err)
+			return nil, c.fatal(ctx, err)
 		}
 	}
 
 	if err := c.bw.Flush(); err != nil {
-		return nil, c.fatal(err)
+		return nil, c.fatal(ctx, err)
 	}
 
 	var deadline time.Time
@@ -660,7 +678,7 @@ func (c *conn) DoWithTimeout(ctx context.Context, readTimeout time.Duration, cmd
 		for i := range reply {
 			r, e := c.readReply()
 			if e != nil {
-				return nil, c.fatal(e)
+				return nil, c.fatal(ctx, e)
 			}
 			reply[i] = r
 		}
@@ -672,7 +690,7 @@ func (c *conn) DoWithTimeout(ctx context.Context, readTimeout time.Duration, cmd
 	for i := 0; i <= pending; i++ {
 		var e error
 		if reply, e = c.readReply(); e != nil {
-			return nil, c.fatal(e)
+			return nil, c.fatal(ctx, e)
 		}
 		if e, ok := reply.(Error); ok && err == nil {
 			err = e
