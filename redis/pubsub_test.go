@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/znly/redigo/redis"
 )
 
 func expectPushed(t *testing.T, c redis.PubSubConn, message string, expected interface{}) {
