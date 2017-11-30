@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/gomodule/redigo/redis"
+	"github.com/znly/redigo/redis"
 )
 
 type valueError struct {

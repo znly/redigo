@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gomodule/redigo/redis"
+	"github.com/znly/redigo/redis"
 )
 
 // zpop pops a value from the ZSET key using WATCH/MULTI/EXEC commands.

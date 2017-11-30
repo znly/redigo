@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gomodule/redigo/internal/redistest"
-	"github.com/gomodule/redigo/redis"
-	"github.com/gomodule/redigo/redisx"
+	"github.com/znly/redigo/internal/redistest"
+	"github.com/znly/redigo/redis"
+	"github.com/znly/redigo/redisx"
 )
 
 func TestConnMux(t *testing.T) {

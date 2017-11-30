@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gomodule/redigo/redis"
+	"github.com/znly/redigo/redis"
 )
 
 type poolTestConn struct {
