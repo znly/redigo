@@ -166,6 +166,14 @@ func DialUseTLS(useTLS bool) DialOption {
 	}}
 }
 
+// similar cloneTLSClientConfig in the stdlib, but also honor skipVerify for the nil case
+func cloneTLSClientConfig(cfg *tls.Config, skipVerify bool) *tls.Config {
+	if cfg == nil {
+		return &tls.Config{InsecureSkipVerify: skipVerify}
+	}
+	return cfg.Clone()
+}
+
 // Dial connects to the Redis server at the given network and
 // address using the specified options.
 func Dial(network, address string, options ...DialOption) (Conn, error) {
