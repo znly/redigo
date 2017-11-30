@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/znly/redigo/redis"
 )
 
 type durationScan struct {
