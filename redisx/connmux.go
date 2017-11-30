@@ -15,6 +15,7 @@
 package redisx
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -59,7 +60,7 @@ type muxConn struct {
 	buf [8]uint
 }
 
-func (c *muxConn) send(flush bool, cmd string, args ...interface{}) error {
+func (c *muxConn) send(ctx context.Context, flush bool, cmd string, args ...interface{}) error {
 	if internal.LookupCommandInfo(cmd).Set != 0 {
 		return errors.New("command not supported by mux pool")
 	}
@@ -68,27 +69,27 @@ func (c *muxConn) send(flush bool, cmd string, args ...interface{}) error {
 	id := p.sendID
 	c.ids = append(c.ids, id)
 	p.sendID++
-	err := p.c.Send(cmd, args...)
+	err := p.c.Send(ctx, cmd, args...)
 	if flush {
-		err = p.c.Flush()
+		err = p.c.Flush(ctx)
 	}
 	p.sendMu.Unlock()
 	return err
 }
 
-func (c *muxConn) Send(cmd string, args ...interface{}) error {
-	return c.send(false, cmd, args...)
+func (c *muxConn) Send(ctx context.Context, cmd string, args ...interface{}) error {
+	return c.send(ctx, false, cmd, args...)
 }
 
-func (c *muxConn) Flush() error {
+func (c *muxConn) Flush(ctx context.Context) error {
 	p := c.p
 	p.sendMu.Lock()
-	err := p.c.Flush()
+	err := p.c.Flush(ctx)
 	p.sendMu.Unlock()
 	return err
 }
 
-func (c *muxConn) Receive() (interface{}, error) {
+func (c *muxConn) Receive(ctx context.Context) (interface{}, error) {
 	if len(c.ids) == 0 {
 		return nil, errors.New("mux pool underflow")
 	}
@@ -112,7 +113,7 @@ func (c *muxConn) Receive() (interface{}, error) {
 		}
 	}
 
-	v, err := p.c.Receive()
+	v, err := p.c.Receive(ctx)
 
 	id++
 	p.recvID = id
@@ -133,18 +134,18 @@ func (c *muxConn) Close() error {
 	if len(c.ids) == 0 {
 		return nil
 	}
-	c.Flush()
+	c.Flush(context.Background())
 	for _ = range c.ids {
-		_, err = c.Receive()
+		_, err = c.Receive(context.Background())
 	}
 	return err
 }
 
-func (c *muxConn) Do(cmd string, args ...interface{}) (interface{}, error) {
-	if err := c.send(true, cmd, args...); err != nil {
+func (c *muxConn) Do(ctx context.Context, cmd string, args ...interface{}) (interface{}, error) {
+	if err := c.send(ctx, true, cmd, args...); err != nil {
 		return nil, err
 	}
-	return c.Receive()
+	return c.Receive(ctx)
 }
 
 func (c *muxConn) Err() error {

@@ -16,6 +16,7 @@ package redis
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -156,7 +157,7 @@ func DialDefaultServer() (Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.Do("FLUSHDB")
+	c.Do(context.Background(), "FLUSHDB")
 	return c, nil
 }
 

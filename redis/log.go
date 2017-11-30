@@ -16,6 +16,7 @@ package redis
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 )
@@ -98,20 +99,20 @@ func (c *loggingConn) print(method, commandName string, args []interface{}, repl
 	c.logger.Output(3, buf.String())
 }
 
-func (c *loggingConn) Do(commandName string, args ...interface{}) (interface{}, error) {
-	reply, err := c.Conn.Do(commandName, args...)
+func (c *loggingConn) Do(ctx context.Context, commandName string, args ...interface{}) (interface{}, error) {
+	reply, err := c.Conn.Do(ctx, commandName, args...)
 	c.print("Do", commandName, args, reply, err)
 	return reply, err
 }
 
-func (c *loggingConn) Send(commandName string, args ...interface{}) error {
-	err := c.Conn.Send(commandName, args...)
+func (c *loggingConn) Send(ctx context.Context, commandName string, args ...interface{}) error {
+	err := c.Conn.Send(ctx, commandName, args...)
 	c.print("Send", commandName, args, nil, err)
 	return err
 }
 
-func (c *loggingConn) Receive() (interface{}, error) {
-	reply, err := c.Conn.Receive()
+func (c *loggingConn) Receive(ctx context.Context) (interface{}, error) {
+	reply, err := c.Conn.Receive(ctx)
 	c.print("Receive", "", nil, reply, err)
 	return reply, err
 }

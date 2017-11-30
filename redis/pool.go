@@ -17,6 +17,7 @@ package redis
 import (
 	"bytes"
 	"container/list"
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"errors"
@@ -377,23 +378,25 @@ func (pc *pooledConnection) Close() error {
 	}
 	pc.c = errorConnection{errConnClosed}
 
+	ctx := context.Background()
+
 	if pc.state&internal.MultiState != 0 {
-		c.Send("DISCARD")
+		c.Send(ctx, "DISCARD")
 		pc.state &^= (internal.MultiState | internal.WatchState)
 	} else if pc.state&internal.WatchState != 0 {
-		c.Send("UNWATCH")
+		c.Send(ctx, "UNWATCH")
 		pc.state &^= internal.WatchState
 	}
 	if pc.state&internal.SubscribeState != 0 {
-		c.Send("UNSUBSCRIBE")
-		c.Send("PUNSUBSCRIBE")
+		c.Send(ctx, "UNSUBSCRIBE")
+		c.Send(ctx, "PUNSUBSCRIBE")
 		// To detect the end of the message stream, ask the server to echo
 		// a sentinel value and read until we see that value.
 		sentinelOnce.Do(initSentinel)
-		c.Send("ECHO", sentinel)
-		c.Flush()
+		c.Send(ctx, "ECHO", sentinel)
+		c.Flush(ctx)
 		for {
-			p, err := c.Receive()
+			p, err := c.Receive(ctx)
 			if err != nil {
 				break
 			}
@@ -403,7 +406,7 @@ func (pc *pooledConnection) Close() error {
 			}
 		}
 	}
-	c.Do("")
+	c.Do(ctx, "")
 	pc.p.put(c, pc.state != 0)
 	return nil
 }
@@ -412,31 +415,33 @@ func (pc *pooledConnection) Err() error {
 	return pc.c.Err()
 }
 
-func (pc *pooledConnection) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
+func (pc *pooledConnection) Do(ctx context.Context, commandName string, args ...interface{}) (reply interface{}, err error) {
 	ci := internal.LookupCommandInfo(commandName)
 	pc.state = (pc.state | ci.Set) &^ ci.Clear
-	return pc.c.Do(commandName, args...)
+	return pc.c.Do(ctx, commandName, args...)
 }
 
-func (pc *pooledConnection) Send(commandName string, args ...interface{}) error {
+func (pc *pooledConnection) Send(ctx context.Context, commandName string, args ...interface{}) error {
 	ci := internal.LookupCommandInfo(commandName)
 	pc.state = (pc.state | ci.Set) &^ ci.Clear
-	return pc.c.Send(commandName, args...)
+	return pc.c.Send(ctx, commandName, args...)
 }
 
-func (pc *pooledConnection) Flush() error {
-	return pc.c.Flush()
+func (pc *pooledConnection) Flush(ctx context.Context) error {
+	return pc.c.Flush(ctx)
 }
 
-func (pc *pooledConnection) Receive() (reply interface{}, err error) {
-	return pc.c.Receive()
+func (pc *pooledConnection) Receive(ctx context.Context) (reply interface{}, err error) {
+	return pc.c.Receive(ctx)
 }
 
 type errorConnection struct{ err error }
 
-func (ec errorConnection) Do(string, ...interface{}) (interface{}, error) { return nil, ec.err }
-func (ec errorConnection) Send(string, ...interface{}) error              { return ec.err }
-func (ec errorConnection) Err() error                                     { return ec.err }
-func (ec errorConnection) Close() error                                   { return ec.err }
-func (ec errorConnection) Flush() error                                   { return ec.err }
-func (ec errorConnection) Receive() (interface{}, error)                  { return nil, ec.err }
+func (ec errorConnection) Do(context.Context, string, ...interface{}) (interface{}, error) {
+	return nil, ec.err
+}
+func (ec errorConnection) Send(context.Context, string, ...interface{}) error { return ec.err }
+func (ec errorConnection) Err() error                                         { return ec.err }
+func (ec errorConnection) Close() error                                       { return ec.err }
+func (ec errorConnection) Flush(context.Context) error                        { return ec.err }
+func (ec errorConnection) Receive(context.Context) (interface{}, error)       { return nil, ec.err }
