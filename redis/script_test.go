@@ -15,6 +15,7 @@
 package redis_test
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -38,7 +39,7 @@ func ExampleScript() {
 	// In a function, use the script Do method to evaluate the script. The Do
 	// method optimistically uses the EVALSHA command. If the script is not
 	// loaded, then the Do method falls back to the EVAL command.
-	reply, err = getScript.Do(c, "foo")
+	reply, err = getScript.Do(context.TODO(), c, "foo")
 }
 
 func TestScript(t *testing.T) {
@@ -53,7 +54,10 @@ func TestScript(t *testing.T) {
 	s := redis.NewScript(2, script)
 	reply := []interface{}{[]byte("key1"), []byte("key2"), []byte("arg1"), []byte("arg2")}
 
-	v, err := s.Do(c, "key1", "key2", "arg1", "arg2")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	v, err := s.Do(ctx, c, "key1", "key2", "arg1", "arg2")
 	if err != nil {
 		t.Errorf("s.Do(c, ...) returned %v", err)
 	}
@@ -62,37 +66,37 @@ func TestScript(t *testing.T) {
 		t.Errorf("s.Do(c, ..); = %v, want %v", v, reply)
 	}
 
-	err = s.Load(c)
+	err = s.Load(ctx, c)
 	if err != nil {
 		t.Errorf("s.Load(c) returned %v", err)
 	}
 
-	err = s.SendHash(c, "key1", "key2", "arg1", "arg2")
+	err = s.SendHash(ctx, c, "key1", "key2", "arg1", "arg2")
 	if err != nil {
 		t.Errorf("s.SendHash(c, ...) returned %v", err)
 	}
 
-	err = c.Flush()
+	err = c.Flush(ctx)
 	if err != nil {
 		t.Errorf("c.Flush() returned %v", err)
 	}
 
-	v, err = c.Receive()
+	v, err = c.Receive(ctx)
 	if !reflect.DeepEqual(v, reply) {
 		t.Errorf("s.SendHash(c, ..); c.Receive() = %v, want %v", v, reply)
 	}
 
-	err = s.Send(c, "key1", "key2", "arg1", "arg2")
+	err = s.Send(ctx, c, "key1", "key2", "arg1", "arg2")
 	if err != nil {
 		t.Errorf("s.Send(c, ...) returned %v", err)
 	}
 
-	err = c.Flush()
+	err = c.Flush(ctx)
 	if err != nil {
 		t.Errorf("c.Flush() returned %v", err)
 	}
 
-	v, err = c.Receive()
+	v, err = c.Receive(ctx)
 	if !reflect.DeepEqual(v, reply) {
 		t.Errorf("s.Send(c, ..); c.Receive() = %v, want %v", v, reply)
 	}

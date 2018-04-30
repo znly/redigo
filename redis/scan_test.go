@@ -15,6 +15,7 @@
 package redis_test
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"reflect"
@@ -92,7 +93,7 @@ func TestScanConversion(t *testing.T) {
 	for _, tt := range scanConversionTests {
 		values := []interface{}{tt.src}
 		dest := reflect.New(reflect.TypeOf(tt.dest))
-		values, err := redis.Scan(values, dest.Interface())
+		values, err := redis.Scan(context.Background(), values, dest.Interface())
 		if err != nil {
 			t.Errorf("Scan(%v) returned error %v", tt, err)
 			continue
@@ -121,7 +122,7 @@ func TestScanConversionError(t *testing.T) {
 	for _, tt := range scanConversionErrorTests {
 		values := []interface{}{tt.src}
 		dest := reflect.New(reflect.TypeOf(tt.dest))
-		values, err := redis.Scan(values, dest.Interface())
+		values, err := redis.Scan(context.Background(), values, dest.Interface())
 		if err == nil {
 			t.Errorf("Scan(%v) did not return error", tt)
 		}
@@ -136,13 +137,13 @@ func ExampleScan() {
 	}
 	defer c.Close()
 
-	c.Send("HMSET", "album:1", "title", "Red", "rating", 5)
-	c.Send("HMSET", "album:2", "title", "Earthbound", "rating", 1)
-	c.Send("HMSET", "album:3", "title", "Beat")
-	c.Send("LPUSH", "albums", "1")
-	c.Send("LPUSH", "albums", "2")
-	c.Send("LPUSH", "albums", "3")
-	values, err := redis.Values(c.Do("SORT", "albums",
+	c.Send(context.TODO(), "HMSET", "album:1", "title", "Red", "rating", 5)
+	c.Send(context.TODO(), "HMSET", "album:2", "title", "Earthbound", "rating", 1)
+	c.Send(context.TODO(), "HMSET", "album:3", "title", "Beat")
+	c.Send(context.TODO(), "LPUSH", "albums", "1")
+	c.Send(context.TODO(), "LPUSH", "albums", "2")
+	c.Send(context.TODO(), "LPUSH", "albums", "3")
+	values, err := redis.Values(c.Do(context.TODO(), "SORT", "albums",
 		"BY", "album:*->rating",
 		"GET", "album:*->title",
 		"GET", "album:*->rating"))
@@ -154,7 +155,7 @@ func ExampleScan() {
 	for len(values) > 0 {
 		var title string
 		rating := -1 // initialize to illegal value to detect nil.
-		values, err = redis.Scan(values, &title, &rating)
+		values, err = redis.Scan(context.TODO(), values, &title, &rating)
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -363,13 +364,13 @@ func ExampleScanSlice() {
 	}
 	defer c.Close()
 
-	c.Send("HMSET", "album:1", "title", "Red", "rating", 5)
-	c.Send("HMSET", "album:2", "title", "Earthbound", "rating", 1)
-	c.Send("HMSET", "album:3", "title", "Beat", "rating", 4)
-	c.Send("LPUSH", "albums", "1")
-	c.Send("LPUSH", "albums", "2")
-	c.Send("LPUSH", "albums", "3")
-	values, err := redis.Values(c.Do("SORT", "albums",
+	c.Send(context.TODO(), "HMSET", "album:1", "title", "Red", "rating", 5)
+	c.Send(context.TODO(), "HMSET", "album:2", "title", "Earthbound", "rating", 1)
+	c.Send(context.TODO(), "HMSET", "album:3", "title", "Beat", "rating", 4)
+	c.Send(context.TODO(), "LPUSH", "albums", "1")
+	c.Send(context.TODO(), "LPUSH", "albums", "2")
+	c.Send(context.TODO(), "LPUSH", "albums", "3")
+	values, err := redis.Values(c.Do(context.TODO(), "SORT", "albums",
 		"BY", "album:*->rating",
 		"GET", "album:*->title",
 		"GET", "album:*->rating"))
@@ -454,7 +455,7 @@ func ExampleArgs() {
 	p1.Author = "Gary"
 	p1.Body = "Hello"
 
-	if _, err := c.Do("HMSET", redis.Args{}.Add("id1").AddFlat(&p1)...); err != nil {
+	if _, err := c.Do(context.TODO(), "HMSET", redis.Args{}.Add("id1").AddFlat(&p1)...); err != nil {
 		fmt.Println(err)
 		return
 	}
@@ -465,14 +466,14 @@ func ExampleArgs() {
 		"body":   "Map",
 	}
 
-	if _, err := c.Do("HMSET", redis.Args{}.Add("id2").AddFlat(m)...); err != nil {
+	if _, err := c.Do(context.TODO(), "HMSET", redis.Args{}.Add("id2").AddFlat(m)...); err != nil {
 		fmt.Println(err)
 		return
 	}
 
 	for _, id := range []string{"id1", "id2"} {
 
-		v, err := redis.Values(c.Do("HGETALL", id))
+		v, err := redis.Values(c.Do(context.TODO(), "HGETALL", id))
 		if err != nil {
 			fmt.Println(err)
 			return

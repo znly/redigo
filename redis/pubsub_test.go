@@ -15,6 +15,7 @@
 package redis_test
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ import (
 )
 
 func expectPushed(t *testing.T, c redis.PubSubConn, message string, expected interface{}) {
-	actual := c.Receive()
+	actual := c.Receive(context.Background())
 	if !reflect.DeepEqual(actual, expected) {
 		t.Errorf("%s = %v, want %v", message, actual, expected)
 	}
@@ -44,30 +45,33 @@ func TestPushed(t *testing.T) {
 
 	c := redis.PubSubConn{Conn: sc}
 
-	c.Subscribe("c1")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c.Subscribe(ctx, "c1")
 	expectPushed(t, c, "Subscribe(c1)", redis.Subscription{Kind: "subscribe", Channel: "c1", Count: 1})
-	c.Subscribe("c2")
+	c.Subscribe(ctx, "c2")
 	expectPushed(t, c, "Subscribe(c2)", redis.Subscription{Kind: "subscribe", Channel: "c2", Count: 2})
-	c.PSubscribe("p1")
+	c.PSubscribe(ctx, "p1")
 	expectPushed(t, c, "PSubscribe(p1)", redis.Subscription{Kind: "psubscribe", Channel: "p1", Count: 3})
-	c.PSubscribe("p2")
+	c.PSubscribe(ctx, "p2")
 	expectPushed(t, c, "PSubscribe(p2)", redis.Subscription{Kind: "psubscribe", Channel: "p2", Count: 4})
-	c.PUnsubscribe()
+	c.PUnsubscribe(ctx)
 	expectPushed(t, c, "Punsubscribe(p1)", redis.Subscription{Kind: "punsubscribe", Channel: "p1", Count: 3})
 	expectPushed(t, c, "Punsubscribe()", redis.Subscription{Kind: "punsubscribe", Channel: "p2", Count: 2})
 
-	pc.Do("PUBLISH", "c1", "hello")
+	pc.Do(ctx, "PUBLISH", "c1", "hello")
 	expectPushed(t, c, "PUBLISH c1 hello", redis.Message{Channel: "c1", Data: []byte("hello")})
 
-	c.Ping("hello")
+	c.Ping(ctx, "hello")
 	expectPushed(t, c, `Ping("hello")`, redis.Pong{Data: "hello"})
 
-	c.Conn.Send("PING")
-	c.Conn.Flush()
+	c.Conn.Send(ctx, "PING")
+	c.Conn.Flush(ctx)
 	expectPushed(t, c, `Send("PING")`, redis.Pong{})
 
-	c.Ping("timeout")
-	got := c.ReceiveWithTimeout(time.Minute)
+	c.Ping(ctx, "timeout")
+	got := c.ReceiveWithTimeout(ctx, time.Minute)
 	if want := (redis.Pong{Data: "timeout"}); want != got {
 		t.Errorf("recv /w timeout got %v, want %v", got, want)
 	}

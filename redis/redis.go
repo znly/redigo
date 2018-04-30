@@ -15,6 +15,7 @@
 package redis
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -33,16 +34,16 @@ type Conn interface {
 	Err() error
 
 	// Do sends a command to the server and returns the received reply.
-	Do(commandName string, args ...interface{}) (reply interface{}, err error)
+	Do(ctx context.Context, commandName string, args ...interface{}) (reply interface{}, err error)
 
 	// Send writes the command to the client's output buffer.
-	Send(commandName string, args ...interface{}) error
+	Send(ctx context.Context, commandName string, args ...interface{}) error
 
 	// Flush flushes the output buffer to the Redis server.
-	Flush() error
+	Flush(ctx context.Context) error
 
 	// Receive receives a single reply from the Redis server
-	Receive() (reply interface{}, err error)
+	Receive(ctx context.Context) (reply interface{}, err error)
 }
 
 // Argument is the interface implemented by an object which wants to control how
@@ -85,11 +86,11 @@ type ConnWithTimeout interface {
 	// Do sends a command to the server and returns the received reply.
 	// The timeout overrides the read timeout set when dialing the
 	// connection.
-	DoWithTimeout(timeout time.Duration, commandName string, args ...interface{}) (reply interface{}, err error)
+	DoWithTimeout(ctx context.Context, timeout time.Duration, commandName string, args ...interface{}) (reply interface{}, err error)
 
 	// Receive receives a single reply from the Redis server. The timeout
 	// overrides the read timeout set when dialing the connection.
-	ReceiveWithTimeout(timeout time.Duration) (reply interface{}, err error)
+	ReceiveWithTimeout(ctx context.Context, timeout time.Duration) (reply interface{}, err error)
 }
 
 var errTimeoutNotSupported = errors.New("redis: connection does not support ConnWithTimeout")
@@ -97,21 +98,21 @@ var errTimeoutNotSupported = errors.New("redis: connection does not support Conn
 // DoWithTimeout executes a Redis command with the specified read timeout. If
 // the connection does not satisfy the ConnWithTimeout interface, then an error
 // is returned.
-func DoWithTimeout(c Conn, timeout time.Duration, cmd string, args ...interface{}) (interface{}, error) {
+func DoWithTimeout(ctx context.Context, c Conn, timeout time.Duration, cmd string, args ...interface{}) (interface{}, error) {
 	cwt, ok := c.(ConnWithTimeout)
 	if !ok {
 		return nil, errTimeoutNotSupported
 	}
-	return cwt.DoWithTimeout(timeout, cmd, args...)
+	return cwt.DoWithTimeout(ctx, timeout, cmd, args...)
 }
 
 // ReceiveWithTimeout receives a reply with the specified read timeout. If the
 // connection does not satisfy the ConnWithTimeout interface, then an error is
 // returned.
-func ReceiveWithTimeout(c Conn, timeout time.Duration) (interface{}, error) {
+func ReceiveWithTimeout(ctx context.Context, c Conn, timeout time.Duration) (interface{}, error) {
 	cwt, ok := c.(ConnWithTimeout)
 	if !ok {
 		return nil, errTimeoutNotSupported
 	}
-	return cwt.ReceiveWithTimeout(timeout)
+	return cwt.ReceiveWithTimeout(ctx, timeout)
 }

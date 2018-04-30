@@ -16,6 +16,7 @@
 package redistest
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -27,11 +28,11 @@ type testConn struct {
 }
 
 func (t testConn) Close() error {
-	_, err := t.Conn.Do("SELECT", "9")
+	_, err := t.Conn.Do(context.Background(), "SELECT", "9")
 	if err != nil {
 		return nil
 	}
-	_, err = t.Conn.Do("FLUSHDB")
+	_, err = t.Conn.Do(context.Background(), "FLUSHDB")
 	if err != nil {
 		return err
 	}
@@ -47,13 +48,13 @@ func Dial() (redis.Conn, error) {
 		return nil, err
 	}
 
-	_, err = c.Do("SELECT", "9")
+	_, err = c.Do(context.Background(), "SELECT", "9")
 	if err != nil {
 		c.Close()
 		return nil, err
 	}
 
-	n, err := redis.Int(c.Do("DBSIZE"))
+	n, err := redis.Int(c.Do(context.Background(), "DBSIZE"))
 	if err != nil {
 		c.Close()
 		return nil, err

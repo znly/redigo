@@ -16,6 +16,7 @@ package redis_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -142,12 +143,14 @@ func TestWrite(t *testing.T) {
 	for _, tt := range writeTests {
 		var buf bytes.Buffer
 		c, _ := redis.Dial("", "", dialTestConn("", &buf))
-		err := c.Send(tt.args[0].(string), tt.args[1:]...)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := c.Send(ctx, tt.args[0].(string), tt.args[1:]...)
+		cancel()
 		if err != nil {
 			t.Errorf("Send(%v) returned error %v", tt.args, err)
 			continue
 		}
-		c.Flush()
+		c.Flush(ctx)
 		actual := buf.String()
 		if actual != tt.expected {
 			t.Errorf("Send(%v) = %q, want %q", tt.args, actual, tt.expected)
@@ -241,7 +244,9 @@ var readTests = []struct {
 func TestRead(t *testing.T) {
 	for _, tt := range readTests {
 		c, _ := redis.Dial("", "", dialTestConn(tt.reply, nil))
-		actual, err := c.Receive()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		actual, err := c.Receive(ctx)
+		cancel()
 		if tt.expected == errorSentinel {
 			if err == nil {
 				t.Errorf("Receive(%q) did not return expected error", tt.reply)
@@ -327,7 +332,9 @@ func TestDoCommands(t *testing.T) {
 	defer c.Close()
 
 	for _, cmd := range testCommands {
-		actual, err := c.Do(cmd.args[0].(string), cmd.args[1:]...)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		actual, err := c.Do(ctx, cmd.args[0].(string), cmd.args[1:]...)
+		cancel()
 		if err != nil {
 			t.Errorf("Do(%v) returned error %v", cmd.args, err)
 			continue
@@ -345,16 +352,18 @@ func TestPipelineCommands(t *testing.T) {
 	}
 	defer c.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	for _, cmd := range testCommands {
-		if err := c.Send(cmd.args[0].(string), cmd.args[1:]...); err != nil {
+		if err := c.Send(ctx, cmd.args[0].(string), cmd.args[1:]...); err != nil {
 			t.Fatalf("Send(%v) returned error %v", cmd.args, err)
 		}
 	}
-	if err := c.Flush(); err != nil {
+	if err := c.Flush(ctx); err != nil {
 		t.Errorf("Flush() returned error %v", err)
 	}
 	for _, cmd := range testCommands {
-		actual, err := c.Receive()
+		actual, err := c.Receive(ctx)
 		if err != nil {
 			t.Fatalf("Receive(%v) returned error %v", cmd.args, err)
 		}
@@ -371,12 +380,14 @@ func TestBlankCommmand(t *testing.T) {
 	}
 	defer c.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	for _, cmd := range testCommands {
-		if err := c.Send(cmd.args[0].(string), cmd.args[1:]...); err != nil {
+		if err := c.Send(ctx, cmd.args[0].(string), cmd.args[1:]...); err != nil {
 			t.Fatalf("Send(%v) returned error %v", cmd.args, err)
 		}
 	}
-	reply, err := redis.Values(c.Do(""))
+	reply, err := redis.Values(c.Do(ctx, ""))
 	if err != nil {
 		t.Fatalf("Do() returned error %v", err)
 	}
@@ -397,16 +408,18 @@ func TestRecvBeforeSend(t *testing.T) {
 		t.Fatalf("error connection to database, %v", err)
 	}
 	defer c.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		c.Receive()
+		c.Receive(ctx)
 		close(done)
 	}()
 	time.Sleep(time.Millisecond)
-	c.Send("PING")
-	c.Flush()
+	c.Send(ctx, "PING")
+	c.Flush(ctx)
 	<-done
-	_, err = c.Do("")
+	_, err = c.Do(ctx, "")
 	if err != nil {
 		t.Fatalf("error=%v", err)
 	}
@@ -419,15 +432,18 @@ func TestError(t *testing.T) {
 	}
 	defer c.Close()
 
-	c.Do("SET", "key", "val")
-	_, err = c.Do("HSET", "key", "fld", "val")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	c.Do(ctx, "SET", "key", "val")
+	_, err = c.Do(ctx, "HSET", "key", "fld", "val")
 	if err == nil {
 		t.Errorf("Expected err for HSET on string key.")
 	}
 	if c.Err() != nil {
 		t.Errorf("Conn has Err()=%v, expect nil", c.Err())
 	}
-	_, err = c.Do("SET", "key", "val")
+	_, err = c.Do(ctx, "SET", "key", "val")
 	if err != nil {
 		t.Errorf("Do(SET, key, val) returned error %v, expected nil.", err)
 	}
@@ -462,7 +478,7 @@ func TestReadTimeout(t *testing.T) {
 	}
 	defer c1.Close()
 
-	_, err = c1.Do("PING")
+	_, err = c1.Do(context.Background(), "PING")
 	if err == nil {
 		t.Fatalf("c1.Do() returned nil, expect error")
 	}
@@ -478,9 +494,9 @@ func TestReadTimeout(t *testing.T) {
 	}
 	defer c2.Close()
 
-	c2.Send("PING")
-	c2.Flush()
-	_, err = c2.Receive()
+	c2.Send(context.Background(), "PING")
+	c2.Flush(context.Background())
+	_, err = c2.Receive(context.Background())
 	if err == nil {
 		t.Fatalf("c2.Receive() returned nil, expect error")
 	}
@@ -580,7 +596,9 @@ func TestDialURL(t *testing.T) {
 }
 
 func checkPingPong(t *testing.T, buf *bytes.Buffer, c redis.Conn) {
-	resp, err := c.Do("PING")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	resp, err := c.Do(ctx, "PING")
+	cancel()
 	if err != nil {
 		t.Fatal("ping error:", err)
 	}
@@ -661,14 +679,17 @@ func TestExecError(t *testing.T) {
 	}
 	defer c.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	// Execute commands that fail before EXEC is called.
 
-	c.Do("DEL", "k0")
-	c.Do("ZADD", "k0", 0, 0)
-	c.Send("MULTI")
-	c.Send("NOTACOMMAND", "k0", 0, 0)
-	c.Send("ZINCRBY", "k0", 0, 0)
-	v, err := c.Do("EXEC")
+	c.Do(ctx, "DEL", "k0")
+	c.Do(ctx, "ZADD", "k0", 0, 0)
+	c.Send(ctx, "MULTI")
+	c.Send(ctx, "NOTACOMMAND", "k0", 0, 0)
+	c.Send(ctx, "ZINCRBY", "k0", 0, 0)
+	v, err := c.Do(ctx, "EXEC")
 	if err == nil {
 		t.Fatalf("EXEC returned values %v, expected error", v)
 	}
@@ -676,12 +697,12 @@ func TestExecError(t *testing.T) {
 	// Execute commands that fail after EXEC is called. The first command
 	// returns an error.
 
-	c.Do("DEL", "k1")
-	c.Do("ZADD", "k1", 0, 0)
-	c.Send("MULTI")
-	c.Send("HSET", "k1", 0, 0)
-	c.Send("ZINCRBY", "k1", 0, 0)
-	v, err = c.Do("EXEC")
+	c.Do(ctx, "DEL", "k1")
+	c.Do(ctx, "ZADD", "k1", 0, 0)
+	c.Send(ctx, "MULTI")
+	c.Send(ctx, "HSET", "k1", 0, 0)
+	c.Send(ctx, "ZINCRBY", "k1", 0, 0)
+	v, err = c.Do(ctx, "EXEC")
 	if err != nil {
 		t.Fatalf("EXEC returned error %v", err)
 	}
@@ -706,11 +727,11 @@ func TestExecError(t *testing.T) {
 	// Execute commands that fail after EXEC is called. The second command
 	// returns an error.
 
-	c.Do("ZADD", "k2", 0, 0)
-	c.Send("MULTI")
-	c.Send("ZINCRBY", "k2", 0, 0)
-	c.Send("HSET", "k2", 0, 0)
-	v, err = c.Do("EXEC")
+	c.Do(ctx, "ZADD", "k2", 0, 0)
+	c.Send(ctx, "MULTI")
+	c.Send(ctx, "ZINCRBY", "k2", 0, 0)
+	c.Send(ctx, "HSET", "k2", 0, 0)
+	v, err = c.Do(ctx, "EXEC")
 	if err != nil {
 		t.Fatalf("EXEC returned error %v", err)
 	}
@@ -742,7 +763,7 @@ func BenchmarkDoEmpty(b *testing.B) {
 	defer c.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := c.Do(""); err != nil {
+		if _, err := c.Do(context.Background(), ""); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -757,7 +778,7 @@ func BenchmarkDoPing(b *testing.B) {
 	defer c.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := c.Do("PING"); err != nil {
+		if _, err := c.Do(context.Background(), "PING"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -825,6 +846,7 @@ Bjqn3yoLHaoZVvbWOi0C2TCN4FjXjaLNZGifQPbIcaA=
 }
 
 func TestWithTimeout(t *testing.T) {
+	ctx := context.Background()
 	for _, recv := range []bool{true, false} {
 		for _, defaultTimout := range []time.Duration{0, time.Minute} {
 			var buf bytes.Buffer
@@ -839,9 +861,9 @@ func TestWithTimeout(t *testing.T) {
 						minDeadline = time.Now().Add(defaultTimout)
 					}
 					if recv {
-						c.Receive()
+						c.Receive(ctx)
 					} else {
-						c.Do("PING")
+						c.Do(ctx, "PING")
 					}
 					if defaultTimout != 0 {
 						maxDeadline = time.Now().Add(defaultTimout)
@@ -850,9 +872,9 @@ func TestWithTimeout(t *testing.T) {
 					timeout := 10 * time.Minute
 					minDeadline = time.Now().Add(timeout)
 					if recv {
-						redis.ReceiveWithTimeout(c, timeout)
+						redis.ReceiveWithTimeout(ctx, c, timeout)
 					} else {
-						redis.DoWithTimeout(c, timeout, "PING")
+						redis.DoWithTimeout(ctx, c, timeout, "PING")
 					}
 					maxDeadline = time.Now().Add(timeout)
 				}

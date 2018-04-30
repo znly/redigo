@@ -46,7 +46,7 @@ func listenPubSubChannels(ctx context.Context, redisServerAddr string,
 
 	psc := redis.PubSubConn{Conn: c}
 
-	if err := psc.Subscribe(redis.Args{}.AddFlat(channels)...); err != nil {
+	if err := psc.Subscribe(ctx, redis.Args{}.AddFlat(channels)...); err != nil {
 		return err
 	}
 
@@ -55,7 +55,7 @@ func listenPubSubChannels(ctx context.Context, redisServerAddr string,
 	// Start a goroutine to receive notifications from the server.
 	go func() {
 		for {
-			switch n := psc.Receive().(type) {
+			switch n := psc.Receive(ctx).(type) {
 			case error:
 				done <- n
 				return
@@ -90,7 +90,7 @@ loop:
 			// Send ping to test health of connection and server. If
 			// corresponding pong is not received, then receive on the
 			// connection will timeout and the receive goroutine will exit.
-			if err = psc.Ping(""); err != nil {
+			if err = psc.Ping(ctx, ""); err != nil {
 				break loop
 			}
 		case <-ctx.Done():
@@ -102,7 +102,7 @@ loop:
 	}
 
 	// Signal the receiving goroutine to exit by unsubscribing from all channels.
-	psc.Unsubscribe()
+	psc.Unsubscribe(ctx)
 
 	// Wait for goroutine to complete.
 	return <-done
@@ -116,9 +116,9 @@ func publish() {
 	}
 	defer c.Close()
 
-	c.Do("PUBLISH", "c1", "hello")
-	c.Do("PUBLISH", "c2", "world")
-	c.Do("PUBLISH", "c1", "goodbye")
+	c.Do(context.Background(), "PUBLISH", "c1", "hello")
+	c.Do(context.Background(), "PUBLISH", "c2", "world")
+	c.Do(context.Background(), "PUBLISH", "c1", "goodbye")
 }
 
 // This example shows how receive pubsub notifications with cancelation and

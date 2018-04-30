@@ -17,6 +17,7 @@ package redis
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -218,14 +219,14 @@ func Dial(network, address string, options ...DialOption) (Conn, error) {
 	}
 
 	if do.password != "" {
-		if _, err := c.Do("AUTH", do.password); err != nil {
+		if _, err := c.Do(context.Background(), "AUTH", do.password); err != nil {
 			netConn.Close()
 			return nil, err
 		}
 	}
 
 	if do.db != 0 {
-		if _, err := c.Do("SELECT", do.db); err != nil {
+		if _, err := c.Do(context.Background(), "SELECT", do.db); err != nil {
 			netConn.Close()
 			return nil, err
 		}
@@ -557,7 +558,7 @@ func (c *conn) readReply() (interface{}, error) {
 	return nil, protocolError("unexpected response line")
 }
 
-func (c *conn) Send(cmd string, args ...interface{}) error {
+func (c *conn) Send(ctx context.Context, cmd string, args ...interface{}) error {
 	c.mu.Lock()
 	c.pending += 1
 	c.mu.Unlock()
@@ -570,7 +571,7 @@ func (c *conn) Send(cmd string, args ...interface{}) error {
 	return nil
 }
 
-func (c *conn) Flush() error {
+func (c *conn) Flush(ctx context.Context) error {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
@@ -580,11 +581,11 @@ func (c *conn) Flush() error {
 	return nil
 }
 
-func (c *conn) Receive() (interface{}, error) {
-	return c.ReceiveWithTimeout(c.readTimeout)
+func (c *conn) Receive(ctx context.Context) (interface{}, error) {
+	return c.ReceiveWithTimeout(ctx, c.readTimeout)
 }
 
-func (c *conn) ReceiveWithTimeout(timeout time.Duration) (reply interface{}, err error) {
+func (c *conn) ReceiveWithTimeout(ctx context.Context, timeout time.Duration) (reply interface{}, err error) {
 	var deadline time.Time
 	if timeout != 0 {
 		deadline = time.Now().Add(timeout)
@@ -612,11 +613,11 @@ func (c *conn) ReceiveWithTimeout(timeout time.Duration) (reply interface{}, err
 	return
 }
 
-func (c *conn) Do(cmd string, args ...interface{}) (interface{}, error) {
-	return c.DoWithTimeout(c.readTimeout, cmd, args...)
+func (c *conn) Do(ctx context.Context, cmd string, args ...interface{}) (interface{}, error) {
+	return c.DoWithTimeout(ctx, c.readTimeout, cmd, args...)
 }
 
-func (c *conn) DoWithTimeout(readTimeout time.Duration, cmd string, args ...interface{}) (interface{}, error) {
+func (c *conn) DoWithTimeout(ctx context.Context, readTimeout time.Duration, cmd string, args ...interface{}) (interface{}, error) {
 	c.mu.Lock()
 	pending := c.pending
 	c.pending = 0

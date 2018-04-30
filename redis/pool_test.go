@@ -15,6 +15,7 @@
 package redis_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"reflect"
@@ -40,7 +41,7 @@ func (c *poolTestConn) Close() error {
 
 func (c *poolTestConn) Err() error { return c.err }
 
-func (c *poolTestConn) Do(commandName string, args ...interface{}) (interface{}, error) {
+func (c *poolTestConn) Do(ctx context.Context, commandName string, args ...interface{}) (interface{}, error) {
 	if commandName == "ERR" {
 		c.err = args[0].(error)
 		commandName = "PING"
@@ -48,12 +49,12 @@ func (c *poolTestConn) Do(commandName string, args ...interface{}) (interface{},
 	if commandName != "" {
 		c.d.commands = append(c.d.commands, commandName)
 	}
-	return c.Conn.Do(commandName, args...)
+	return c.Conn.Do(ctx, commandName, args...)
 }
 
-func (c *poolTestConn) Send(commandName string, args ...interface{}) error {
+func (c *poolTestConn) Send(ctx context.Context, commandName string, args ...interface{}) error {
 	c.d.commands = append(c.d.commands, commandName)
-	return c.Conn.Send(commandName, args...)
+	return c.Conn.Send(ctx, commandName, args...)
 }
 
 type poolDialer struct {
@@ -111,11 +112,14 @@ func TestPoolReuse(t *testing.T) {
 		Dial:    d.dial,
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	for i := 0; i < 10; i++ {
 		c1 := p.Get()
-		c1.Do("PING")
+		c1.Do(ctx, "PING")
 		c2 := p.Get()
-		c2.Do("PING")
+		c2.Do(ctx, "PING")
 		c1.Close()
 		c2.Close()
 	}
@@ -133,13 +137,16 @@ func TestPoolMaxIdle(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	for i := 0; i < 10; i++ {
 		c1 := p.Get()
-		c1.Do("PING")
+		c1.Do(ctx, "PING")
 		c2 := p.Get()
-		c2.Do("PING")
+		c2.Do(ctx, "PING")
 		c3 := p.Get()
-		c3.Do("PING")
+		c3.Do(ctx, "PING")
 		c1.Close()
 		c2.Close()
 		c3.Close()
@@ -157,15 +164,18 @@ func TestPoolError(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	c := p.Get()
-	c.Do("ERR", io.EOF)
+	c.Do(ctx, "ERR", io.EOF)
 	if c.Err() == nil {
 		t.Errorf("expected c.Err() != nil")
 	}
 	c.Close()
 
 	c = p.Get()
-	c.Do("ERR", io.EOF)
+	c.Do(ctx, "ERR", io.EOF)
 	c.Close()
 
 	d.check(".", p, 2, 0, 0)
@@ -179,15 +189,18 @@ func TestPoolClose(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	c1 := p.Get()
-	c1.Do("PING")
+	c1.Do(ctx, "PING")
 	c2 := p.Get()
-	c2.Do("PING")
+	c2.Do(ctx, "PING")
 	c3 := p.Get()
-	c3.Do("PING")
+	c3.Do(ctx, "PING")
 
 	c1.Close()
-	if _, err := c1.Do("PING"); err == nil {
+	if _, err := c1.Do(ctx, "PING"); err == nil {
 		t.Errorf("expected error after connection closed")
 	}
 
@@ -198,7 +211,7 @@ func TestPoolClose(t *testing.T) {
 
 	d.check("after pool close", p, 3, 1, 1)
 
-	if _, err := c1.Do("PING"); err == nil {
+	if _, err := c1.Do(ctx, "PING"); err == nil {
 		t.Errorf("expected error after connection and pool closed")
 	}
 
@@ -207,12 +220,13 @@ func TestPoolClose(t *testing.T) {
 	d.check("after conn close", p, 3, 0, 0)
 
 	c1 = p.Get()
-	if _, err := c1.Do("PING"); err == nil {
+	if _, err := c1.Do(ctx, "PING"); err == nil {
 		t.Errorf("expected error after pool closed")
 	}
 }
 
 func TestPoolClosedConn(t *testing.T) {
+	ctx := context.Background()
 	d := poolDialer{t: t}
 	p := &redis.Pool{
 		MaxIdle:     2,
@@ -228,16 +242,16 @@ func TestPoolClosedConn(t *testing.T) {
 	if err := c.Err(); err == nil {
 		t.Fatal("Err on closed connection did not return error")
 	}
-	if _, err := c.Do("PING"); err == nil {
+	if _, err := c.Do(ctx, "PING"); err == nil {
 		t.Fatal("Do on closed connection did not return error")
 	}
-	if err := c.Send("PING"); err == nil {
+	if err := c.Send(ctx, "PING"); err == nil {
 		t.Fatal("Send on closed connection did not return error")
 	}
-	if err := c.Flush(); err == nil {
+	if err := c.Flush(ctx); err == nil {
 		t.Fatal("Flush on closed connection did not return error")
 	}
-	if _, err := c.Receive(); err == nil {
+	if _, err := c.Receive(ctx); err == nil {
 		t.Fatal("Receive on closed connection did not return error")
 	}
 }
@@ -255,8 +269,11 @@ func TestPoolIdleTimeout(t *testing.T) {
 	redis.SetNowFunc(func() time.Time { return now })
 	defer redis.SetNowFunc(time.Now)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	c := p.Get()
-	c.Do("PING")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	d.check("1", p, 1, 1, 0)
@@ -264,13 +281,14 @@ func TestPoolIdleTimeout(t *testing.T) {
 	now = now.Add(p.IdleTimeout + 1)
 
 	c = p.Get()
-	c.Do("PING")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	d.check("2", p, 2, 1, 0)
 }
 
 func TestPoolMaxLifetime(t *testing.T) {
+	ctx := context.Background()
 	d := poolDialer{t: t}
 	p := &redis.Pool{
 		MaxIdle:         2,
@@ -284,7 +302,7 @@ func TestPoolMaxLifetime(t *testing.T) {
 	defer redis.SetNowFunc(time.Now)
 
 	c := p.Get()
-	c.Do("PING")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	d.check("1", p, 1, 1, 0)
@@ -292,7 +310,7 @@ func TestPoolMaxLifetime(t *testing.T) {
 	now = now.Add(p.MaxConnLifetime + 1)
 
 	c = p.Get()
-	c.Do("PING")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	d.check("2", p, 2, 1, 0)
@@ -304,19 +322,22 @@ func TestPoolConcurrenSendReceive(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	c := p.Get()
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.Receive()
+		_, err := c.Receive(ctx)
 		done <- err
 	}()
-	c.Send("PING")
-	c.Flush()
+	c.Send(ctx, "PING")
+	c.Flush(ctx)
 	err := <-done
 	if err != nil {
 		t.Fatalf("Receive() returned error %v", err)
 	}
-	_, err = c.Do("")
+	_, err = c.Do(ctx, "")
 	if err != nil {
 		t.Fatalf("Do() returned error %v", err)
 	}
@@ -332,9 +353,12 @@ func TestPoolBorrowCheck(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	for i := 0; i < 10; i++ {
 		c := p.Get()
-		c.Do("PING")
+		c.Do(ctx, "PING")
 		c.Close()
 	}
 	d.check("1", p, 10, 1, 0)
@@ -349,15 +373,18 @@ func TestPoolMaxActive(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	c1 := p.Get()
-	c1.Do("PING")
+	c1.Do(ctx, "PING")
 	c2 := p.Get()
-	c2.Do("PING")
+	c2.Do(ctx, "PING")
 
 	d.check("1", p, 2, 2, 2)
 
 	c3 := p.Get()
-	if _, err := c3.Do("PING"); err != redis.ErrPoolExhausted {
+	if _, err := c3.Do(ctx, "PING"); err != redis.ErrPoolExhausted {
 		t.Errorf("expected pool exhausted")
 	}
 
@@ -367,7 +394,7 @@ func TestPoolMaxActive(t *testing.T) {
 	d.check("3", p, 2, 2, 1)
 
 	c3 = p.Get()
-	if _, err := c3.Do("PING"); err != nil {
+	if _, err := c3.Do(ctx, "PING"); err != nil {
 		t.Errorf("expected good channel, err=%v", err)
 	}
 	c3.Close()
@@ -384,8 +411,11 @@ func TestPoolMonitorCleanup(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	c := p.Get()
-	c.Send("MONITOR")
+	c.Send(ctx, "MONITOR")
 	c.Close()
 
 	d.check("", p, 1, 0, 0)
@@ -400,8 +430,11 @@ func TestPoolPubSubCleanup(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	c := p.Get()
-	c.Send("SUBSCRIBE", "x")
+	c.Send(ctx, "SUBSCRIBE", "x")
 	c.Close()
 
 	want := []string{"SUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE", "ECHO"}
@@ -411,7 +444,7 @@ func TestPoolPubSubCleanup(t *testing.T) {
 	d.commands = nil
 
 	c = p.Get()
-	c.Send("PSUBSCRIBE", "x*")
+	c.Send(ctx, "PSUBSCRIBE", "x*")
 	c.Close()
 
 	want = []string{"PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE", "ECHO"}
@@ -430,9 +463,12 @@ func TestPoolTransactionCleanup(t *testing.T) {
 	}
 	defer p.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	c := p.Get()
-	c.Do("WATCH", "key")
-	c.Do("PING")
+	c.Do(ctx, "WATCH", "key")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	want := []string{"WATCH", "PING", "UNWATCH"}
@@ -442,9 +478,9 @@ func TestPoolTransactionCleanup(t *testing.T) {
 	d.commands = nil
 
 	c = p.Get()
-	c.Do("WATCH", "key")
-	c.Do("UNWATCH")
-	c.Do("PING")
+	c.Do(ctx, "WATCH", "key")
+	c.Do(ctx, "UNWATCH")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	want = []string{"WATCH", "UNWATCH", "PING"}
@@ -454,9 +490,9 @@ func TestPoolTransactionCleanup(t *testing.T) {
 	d.commands = nil
 
 	c = p.Get()
-	c.Do("WATCH", "key")
-	c.Do("MULTI")
-	c.Do("PING")
+	c.Do(ctx, "WATCH", "key")
+	c.Do(ctx, "MULTI")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	want = []string{"WATCH", "MULTI", "PING", "DISCARD"}
@@ -466,10 +502,10 @@ func TestPoolTransactionCleanup(t *testing.T) {
 	d.commands = nil
 
 	c = p.Get()
-	c.Do("WATCH", "key")
-	c.Do("MULTI")
-	c.Do("DISCARD")
-	c.Do("PING")
+	c.Do(ctx, "WATCH", "key")
+	c.Do(ctx, "MULTI")
+	c.Do(ctx, "DISCARD")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	want = []string{"WATCH", "MULTI", "DISCARD", "PING"}
@@ -479,10 +515,10 @@ func TestPoolTransactionCleanup(t *testing.T) {
 	d.commands = nil
 
 	c = p.Get()
-	c.Do("WATCH", "key")
-	c.Do("MULTI")
-	c.Do("EXEC")
-	c.Do("PING")
+	c.Do(ctx, "WATCH", "key")
+	c.Do(ctx, "MULTI")
+	c.Do(ctx, "EXEC")
+	c.Do(ctx, "PING")
 	c.Close()
 
 	want = []string{"WATCH", "MULTI", "EXEC", "PING"}
@@ -494,10 +530,11 @@ func TestPoolTransactionCleanup(t *testing.T) {
 
 func startGoroutines(p *redis.Pool, cmd string, args ...interface{}) chan error {
 	errs := make(chan error, 10)
+
 	for i := 0; i < cap(errs); i++ {
 		go func() {
 			c := p.Get()
-			_, err := c.Do(cmd, args...)
+			_, err := c.Do(context.Background(), cmd, args...)
 			c.Close()
 			errs <- err
 		}()
@@ -545,7 +582,7 @@ func TestWaitPoolClose(t *testing.T) {
 	defer p.Close()
 
 	c := p.Get()
-	if _, err := c.Do("PING"); err != nil {
+	if _, err := c.Do(context.Background(), "PING"); err != nil {
 		t.Fatal(err)
 	}
 	errs := startGoroutines(p, "PING")
@@ -738,7 +775,7 @@ func BenchmarkPoolGetPing(b *testing.B) {
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		c = p.Get()
-		if _, err := c.Do("PING"); err != nil {
+		if _, err := c.Do(context.Background(), "PING"); err != nil {
 			b.Fatal(err)
 		}
 		c.Close()

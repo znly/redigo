@@ -15,6 +15,7 @@
 package redis_test
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -153,8 +154,8 @@ func ExampleBool() {
 	}
 	defer c.Close()
 
-	c.Do("SET", "foo", 1)
-	exists, _ := redis.Bool(c.Do("EXISTS", "foo"))
+	c.Do(context.TODO(), "SET", "foo", 1)
+	exists, _ := redis.Bool(c.Do(context.TODO(), "EXISTS", "foo"))
 	fmt.Printf("%#v\n", exists)
 	// Output:
 	// true
@@ -168,10 +169,10 @@ func ExampleInt() {
 	}
 	defer c.Close()
 
-	c.Do("SET", "k1", 1)
-	n, _ := redis.Int(c.Do("GET", "k1"))
+	c.Do(context.TODO(), "SET", "k1", 1)
+	n, _ := redis.Int(c.Do(context.TODO(), "GET", "k1"))
 	fmt.Printf("%#v\n", n)
-	n, _ = redis.Int(c.Do("INCR", "k1"))
+	n, _ = redis.Int(c.Do(context.TODO(), "INCR", "k1"))
 	fmt.Printf("%#v\n", n)
 	// Output:
 	// 1
@@ -186,8 +187,8 @@ func ExampleInts() {
 	}
 	defer c.Close()
 
-	c.Do("SADD", "set_with_integers", 4, 5, 6)
-	ints, _ := redis.Ints(c.Do("SMEMBERS", "set_with_integers"))
+	c.Do(context.TODO(), "SADD", "set_with_integers", 4, 5, 6)
+	ints, _ := redis.Ints(c.Do(context.TODO(), "SMEMBERS", "set_with_integers"))
 	fmt.Printf("%#v\n", ints)
 	// Output:
 	// []int{4, 5, 6}
@@ -201,8 +202,8 @@ func ExampleString() {
 	}
 	defer c.Close()
 
-	c.Do("SET", "hello", "world")
-	s, err := redis.String(c.Do("GET", "hello"))
+	c.Do(context.TODO(), "SET", "hello", "world")
+	s, err := redis.String(c.Do(context.TODO(), "GET", "hello"))
 	fmt.Printf("%#v\n", s)
 	// Output:
 	// "world"

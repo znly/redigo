@@ -15,6 +15,7 @@
 package redis
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -254,7 +255,7 @@ func convertAssign(d interface{}, s interface{}) (err error) {
 //
 // To enable easy use of Scan in a loop, Scan returns the slice of src
 // following the copied values.
-func Scan(src []interface{}, dest ...interface{}) ([]interface{}, error) {
+func Scan(ctx context.Context, src []interface{}, dest ...interface{}) ([]interface{}, error) {
 	if len(src) < len(dest) {
 		return nil, errors.New("redigo.Scan: array short")
 	}

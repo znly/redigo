@@ -16,6 +16,7 @@ package redis
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"errors"
@@ -398,23 +399,25 @@ func (ac *activeConn) Close() error {
 	}
 	ac.pc = nil
 
+	ctx := context.Background()
+
 	if ac.state&internal.MultiState != 0 {
-		pc.c.Send("DISCARD")
+		pc.c.Send(ctx, "DISCARD")
 		ac.state &^= (internal.MultiState | internal.WatchState)
 	} else if ac.state&internal.WatchState != 0 {
-		pc.c.Send("UNWATCH")
+		pc.c.Send(ctx, "UNWATCH")
 		ac.state &^= internal.WatchState
 	}
 	if ac.state&internal.SubscribeState != 0 {
-		pc.c.Send("UNSUBSCRIBE")
-		pc.c.Send("PUNSUBSCRIBE")
+		pc.c.Send(ctx, "UNSUBSCRIBE")
+		pc.c.Send(ctx, "PUNSUBSCRIBE")
 		// To detect the end of the message stream, ask the server to echo
 		// a sentinel value and read until we see that value.
 		sentinelOnce.Do(initSentinel)
-		pc.c.Send("ECHO", sentinel)
-		pc.c.Flush()
+		pc.c.Send(ctx, "ECHO", sentinel)
+		pc.c.Flush(ctx)
 		for {
-			p, err := pc.c.Receive()
+			p, err := pc.c.Receive(ctx)
 			if err != nil {
 				break
 			}
@@ -424,7 +427,7 @@ func (ac *activeConn) Close() error {
 			}
 		}
 	}
-	pc.c.Do("")
+	pc.c.Do(ctx, "")
 	ac.p.put(pc, ac.state != 0 || pc.c.Err() != nil)
 	return nil
 }
@@ -437,17 +440,17 @@ func (ac *activeConn) Err() error {
 	return pc.c.Err()
 }
 
-func (ac *activeConn) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
+func (ac *activeConn) Do(ctx context.Context, commandName string, args ...interface{}) (reply interface{}, err error) {
 	pc := ac.pc
 	if pc == nil {
 		return nil, errConnClosed
 	}
 	ci := internal.LookupCommandInfo(commandName)
 	ac.state = (ac.state | ci.Set) &^ ci.Clear
-	return pc.c.Do(commandName, args...)
+	return pc.c.Do(ctx, commandName, args...)
 }
 
-func (ac *activeConn) DoWithTimeout(timeout time.Duration, commandName string, args ...interface{}) (reply interface{}, err error) {
+func (ac *activeConn) DoWithTimeout(ctx context.Context, timeout time.Duration, commandName string, args ...interface{}) (reply interface{}, err error) {
 	pc := ac.pc
 	if pc == nil {
 		return nil, errConnClosed
@@ -458,36 +461,36 @@ func (ac *activeConn) DoWithTimeout(timeout time.Duration, commandName string, a
 	}
 	ci := internal.LookupCommandInfo(commandName)
 	ac.state = (ac.state | ci.Set) &^ ci.Clear
-	return cwt.DoWithTimeout(timeout, commandName, args...)
+	return cwt.DoWithTimeout(ctx, timeout, commandName, args...)
 }
 
-func (ac *activeConn) Send(commandName string, args ...interface{}) error {
+func (ac *activeConn) Send(ctx context.Context, commandName string, args ...interface{}) error {
 	pc := ac.pc
 	if pc == nil {
 		return errConnClosed
 	}
 	ci := internal.LookupCommandInfo(commandName)
 	ac.state = (ac.state | ci.Set) &^ ci.Clear
-	return pc.c.Send(commandName, args...)
+	return pc.c.Send(ctx, commandName, args...)
 }
 
-func (ac *activeConn) Flush() error {
+func (ac *activeConn) Flush(ctx context.Context) error {
 	pc := ac.pc
 	if pc == nil {
 		return errConnClosed
 	}
-	return pc.c.Flush()
+	return pc.c.Flush(ctx)
 }
 
-func (ac *activeConn) Receive() (reply interface{}, err error) {
+func (ac *activeConn) Receive(ctx context.Context) (reply interface{}, err error) {
 	pc := ac.pc
 	if pc == nil {
 		return nil, errConnClosed
 	}
-	return pc.c.Receive()
+	return pc.c.Receive(ctx)
 }
 
-func (ac *activeConn) ReceiveWithTimeout(timeout time.Duration) (reply interface{}, err error) {
+func (ac *activeConn) ReceiveWithTimeout(ctx context.Context, timeout time.Duration) (reply interface{}, err error) {
 	pc := ac.pc
 	if pc == nil {
 		return nil, errConnClosed
@@ -496,21 +499,25 @@ func (ac *activeConn) ReceiveWithTimeout(timeout time.Duration) (reply interface
 	if !ok {
 		return nil, errTimeoutNotSupported
 	}
-	return cwt.ReceiveWithTimeout(timeout)
+	return cwt.ReceiveWithTimeout(ctx, timeout)
 }
 
 type errorConn struct{ err error }
 
-func (ec errorConn) Do(string, ...interface{}) (interface{}, error) { return nil, ec.err }
-func (ec errorConn) DoWithTimeout(time.Duration, string, ...interface{}) (interface{}, error) {
+func (ec errorConn) Do(context.Context, string, ...interface{}) (interface{}, error) {
 	return nil, ec.err
 }
-func (ec errorConn) Send(string, ...interface{}) error                     { return ec.err }
-func (ec errorConn) Err() error                                            { return ec.err }
-func (ec errorConn) Close() error                                          { return nil }
-func (ec errorConn) Flush() error                                          { return ec.err }
-func (ec errorConn) Receive() (interface{}, error)                         { return nil, ec.err }
-func (ec errorConn) ReceiveWithTimeout(time.Duration) (interface{}, error) { return nil, ec.err }
+func (ec errorConn) DoWithTimeout(context.Context, time.Duration, string, ...interface{}) (interface{}, error) {
+	return nil, ec.err
+}
+func (ec errorConn) Send(context.Context, string, ...interface{}) error { return ec.err }
+func (ec errorConn) Err() error                                         { return ec.err }
+func (ec errorConn) Close() error                                       { return nil }
+func (ec errorConn) Flush(context.Context) error                        { return ec.err }
+func (ec errorConn) Receive(context.Context) (interface{}, error)       { return nil, ec.err }
+func (ec errorConn) ReceiveWithTimeout(context.Context, time.Duration) (interface{}, error) {
+	return nil, ec.err
+}
 
 type idleList struct {
 	count       int
