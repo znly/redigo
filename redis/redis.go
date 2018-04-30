@@ -14,6 +14,8 @@
 
 package redis
 
+import "context"
+
 // Error represents an error returned in a command reply.
 type Error string
 
@@ -28,16 +30,16 @@ type Conn interface {
 	Err() error
 
 	// Do sends a command to the server and returns the received reply.
-	Do(commandName string, args ...interface{}) (reply interface{}, err error)
+	Do(ctx context.Context, commandName string, args ...interface{}) (reply interface{}, err error)
 
 	// Send writes the command to the client's output buffer.
-	Send(commandName string, args ...interface{}) error
+	Send(ctx context.Context, commandName string, args ...interface{}) error
 
 	// Flush flushes the output buffer to the Redis server.
-	Flush() error
+	Flush(ctx context.Context) error
 
 	// Receive receives a single reply from the Redis server
-	Receive() (reply interface{}, err error)
+	Receive(ctx context.Context) (reply interface{}, err error)
 }
 
 // Argument is the interface implemented by an object which wants to control how

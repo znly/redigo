@@ -17,6 +17,7 @@ package redis
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -209,14 +210,14 @@ func Dial(network, address string, options ...DialOption) (Conn, error) {
 	}
 
 	if do.password != "" {
-		if _, err := c.Do("AUTH", do.password); err != nil {
+		if _, err := c.Do(context.Background(), "AUTH", do.password); err != nil {
 			netConn.Close()
 			return nil, err
 		}
 	}
 
 	if do.db != 0 {
-		if _, err := c.Do("SELECT", do.db); err != nil {
+		if _, err := c.Do(context.Background(), "SELECT", do.db); err != nil {
 			netConn.Close()
 			return nil, err
 		}
@@ -548,7 +549,7 @@ func (c *conn) readReply() (interface{}, error) {
 	return nil, protocolError("unexpected response line")
 }
 
-func (c *conn) Send(cmd string, args ...interface{}) error {
+func (c *conn) Send(ctx context.Context, cmd string, args ...interface{}) error {
 	c.mu.Lock()
 	c.pending += 1
 	c.mu.Unlock()
@@ -561,7 +562,7 @@ func (c *conn) Send(cmd string, args ...interface{}) error {
 	return nil
 }
 
-func (c *conn) Flush() error {
+func (c *conn) Flush(ctx context.Context) error {
 	if c.writeTimeout != 0 {
 		c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout))
 	}
@@ -571,7 +572,7 @@ func (c *conn) Flush() error {
 	return nil
 }
 
-func (c *conn) Receive() (reply interface{}, err error) {
+func (c *conn) Receive(ctx context.Context) (reply interface{}, err error) {
 	if c.readTimeout != 0 {
 		c.conn.SetReadDeadline(time.Now().Add(c.readTimeout))
 	}
@@ -596,7 +597,7 @@ func (c *conn) Receive() (reply interface{}, err error) {
 	return
 }
 
-func (c *conn) Do(cmd string, args ...interface{}) (interface{}, error) {
+func (c *conn) Do(ctx context.Context, cmd string, args ...interface{}) (interface{}, error) {
 	c.mu.Lock()
 	pending := c.pending
 	c.pending = 0

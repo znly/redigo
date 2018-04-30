@@ -15,9 +15,11 @@
 package redisx_test
 
 import (
+	"context"
 	"net/textproto"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/garyburd/redigo/internal/redistest"
 	"github.com/garyburd/redigo/redis"
@@ -32,20 +34,23 @@ func TestConnMux(t *testing.T) {
 	m := redisx.NewConnMux(c)
 	defer m.Close()
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	c1 := m.Get()
 	c2 := m.Get()
-	c1.Send("ECHO", "hello")
-	c2.Send("ECHO", "world")
-	c1.Flush()
-	c2.Flush()
-	s, err := redis.String(c1.Receive())
+	c1.Send(ctx, "ECHO", "hello")
+	c2.Send(ctx, "ECHO", "world")
+	c1.Flush(ctx)
+	c2.Flush(ctx)
+	s, err := redis.String(c1.Receive(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s != "hello" {
 		t.Fatalf("echo returned %q, want %q", s, "hello")
 	}
-	s, err = redis.String(c2.Receive())
+	s, err = redis.String(c2.Receive(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,21 +72,24 @@ func TestConnMuxClose(t *testing.T) {
 	c1 := m.Get()
 	c2 := m.Get()
 
-	if err := c1.Send("ECHO", "hello"); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := c1.Send(ctx, "ECHO", "hello"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c1.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := c2.Send("ECHO", "world"); err != nil {
+	if err := c2.Send(ctx, "ECHO", "world"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c2.Flush(); err != nil {
+	if err := c2.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	s, err := redis.String(c2.Receive())
+	s, err := redis.String(c2.Receive(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +109,7 @@ func BenchmarkConn(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := c.Do("PING"); err != nil {
+		if _, err := c.Do(context.Background(), "PING"); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -120,7 +128,7 @@ func BenchmarkConnMux(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		c := m.Get()
-		if _, err := c.Do("PING"); err != nil {
+		if _, err := c.Do(context.Background(), "PING"); err != nil {
 			b.Fatal(err)
 		}
 		c.Close()
@@ -144,7 +152,7 @@ func BenchmarkPool(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		c := p.Get()
-		if _, err := c.Do("PING"); err != nil {
+		if _, err := c.Do(context.Background(), "PING"); err != nil {
 			b.Fatal(err)
 		}
 		c.Close()
@@ -173,7 +181,7 @@ func BenchmarkConnMuxConcurrent(b *testing.B) {
 			defer wg.Done()
 			for i := 0; i < b.N; i++ {
 				c := m.Get()
-				if _, err := c.Do("PING"); err != nil {
+				if _, err := c.Do(context.Background(), "PING"); err != nil {
 					b.Fatal(err)
 				}
 				c.Close()
@@ -212,7 +220,7 @@ func BenchmarkPoolConcurrent(b *testing.B) {
 			defer wg.Done()
 			for i := 0; i < b.N; i++ {
 				c := p.Get()
-				if _, err := c.Do("PING"); err != nil {
+				if _, err := c.Do(context.Background(), "PING"); err != nil {
 					b.Fatal(err)
 				}
 				c.Close()
@@ -237,17 +245,18 @@ func BenchmarkPipelineConcurrency(b *testing.B) {
 
 	b.StartTimer()
 
+	ctx := context.Background()
 	for i := 0; i < numConcurrent; i++ {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < b.N; i++ {
 				id := pipeline.Next()
 				pipeline.StartRequest(id)
-				c.Send("PING")
-				c.Flush()
+				c.Send(ctx, "PING")
+				c.Flush(ctx)
 				pipeline.EndRequest(id)
 				pipeline.StartResponse(id)
-				_, err := c.Receive()
+				_, err := c.Receive(ctx)
 				if err != nil {
 					b.Fatal(err)
 				}
